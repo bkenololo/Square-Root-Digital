@@ -1,45 +1,122 @@
-# 16-bit Fixed-Point Square Root Accelerator on FPGA
-A high-throughput hardware accelerator for calculating square roots using the Newton-Raphson method and Goldschmidt's Division, implemented on Cyclone IV FPGA.
+# FPGA Fixed-Point Square Root Accelerator (Q8.8)
 
-## 🚀 Overview
-This project implements a hardware-based square root calculator designed for high-speed digital signal processing applications. Unlike standard iterative approaches, this system leverages specific hardware optimizations to balance precision, latency, and resource utilization.
+##  TL;DR
 
-* **Input/Output:** 16-bit Unsigned Integer / Fixed-Point **U-Q8.8**.
-* **Target Hardware:** Altera/Intel Cyclone IV FPGA.
-* **Key Algorithms:** Newton-Raphson Approximation & Goldschmidt Division.
+* **Function:** Hardware accelerator for Square Root () calculation using **Newton-Raphson** & **Goldschmidt Division**.
+* **Precision:** 16-bit Fixed-Point (**U-Q8.8** format).
+* **Performance:** **SQNR 79.63 dB** (Equivalent to ~13-bit precision).
+* **Verification:** Python-based Hardware-in-the-Loop (HIL) via **UART**.
+* **Hardware:** Target for Altera Cyclone IV (DE10-Lite).
 
-## ✨ Key Features
-* **Fixed-Point Arithmetic:** Optimized for **U-Q8.8** format to minimize floating-point overhead.
-* **High-Speed Division:** Utilizes **Goldschmidt’s Algorithm** to replace standard long division, taking advantage of the FPGA's integrated **18x18 DSP Multipliers**.
-* **Efficient Normalization:** Implements a **Binary Tree MSB Detector** and **Barrel Shifter** for low-latency data normalization.
-* **Robust Control:** Dedicated **FSMs** for UART communication and Main Control, featuring a **Check-Zero failsafe** to prevent division-by-zero errors.
-* **Interface:** Custom **16-bit UART RX/TX** for real-time data acquisition.
+---
 
-## 🏗️ System Architecture
-### 1. Datapath
-The datapath is designed to support the iterative nature of the Newton-Raphson method ($x_{i+1} = 0.5 \times (x_i + N/x_i)$).
-* **Multiplication:** Uses on-chip **DSP Blocks** for fast execution.
-* **Initial Guess:** Retrieved from a **BRAM-based Look-Up Table (LUT)** to reduce convergence time.
-* **Normalization:** A combinational logic block (MSB Detector + Barrel Shifter) scales the input to the optimal range for the algorithm.
+## 📂 Repository Structure
 
-### 2. Control Logic (FSM)
-The system is governed by a central Finite State Machine with the following states:
-1.  **IDLE:** Waiting for valid input.
-2.  **CHECK ZERO:** Failsafe state to return 0 immediately if input is 0.
-3.  **LUT LOOKUP:** Fetching the initial seed.
-4.  **DIVIDE:** Executing Goldschmidt division iterations.
-5.  **CHECK:** Verifying convergence criteria.
-6.  **DONE:** Outputting valid result via UART.
+```text
+.
+├── src/           # Synthesizable VHDL Source Code (RTL)
+│   ├── System_Integration_Top.vhd   # Top-Level Entity
+│   ├── Sqrt_Logic.vhd               # Core Arithmetic Logic
+│   └── UART_*.vhd                   # UART TX/RX Modules
+│
+├── tb/            # VHDL Testbenches
+│   └── tb_sqrt.vhd                  # Simulation Testbench
+│
+├── script/        # Python Verification Suite
+│   ├── full_test_suite.py           # Automated HIL Testing
+│   └── generate_report.py           # Statistical Analysis
+│
+├── data/          # Measurement Results
+│   ├── scientific_results.csv       # Precision Analysis
+│   └── latency_results.csv          # Timing Analysis
+│
+└── docs/          # Documentation
+    ├── Block_Diagram.png
+    └── Waveform_Simulation.png
 
-## 📊 Algorithm Details
-### Newton-Raphson Method
-Used for finding the root. We implemented the fixed-point variant to allow for iterative convergence without floating-point units.
+```
 
-### Goldschmidt Division
-Selected over restoring/non-restoring division because it converges quadratically and can be parallelized using multipliers, making it significantly faster on FPGAs with DSP slices.
+---
 
-## 🛠️ Tools & Technologies
-* **Language:** VHDL
-* **Simulation:** ModelSim / Questasim
-* **Synthesis:** Intel Quartus Prime
-* **Hardware:** DE10-Lite / Cyclone IV Board
+## ⚙️ Technical Specifications
+
+| Parameter | Value / Description |
+| --- | --- |
+| **Numeric Format** | Unsigned Fixed-Point Q8.8 (8-bit Integer, 8-bit Fractional) |
+| **Input Range** |  (16-bit integer mapped to Q8.8) |
+| **Core Algorithm** | Iterative Newton-Raphson () |
+| **Division Method** | Goldschmidt Algorithm (Multiplication-based convergence) |
+| **Multiplier** | Utilizes FPGA Embedded **DSP Blocks (18x18)** |
+| **Communication** | UART (Configurable Baud: 9600 / 115200) |
+| **Resource Usage** | Optimized for Logic Elements (LEs) & Embedded Multipliers |
+
+---
+
+## 📊 Measured Performance (Hardware Validation)
+
+*Based on 65,535 test vectors verified against Python `math.sqrt` reference.*
+
+### Precision & Accuracy
+
+* **SQNR:** **79.63 dB** (Signal-to-Quantization-Noise Ratio).
+* **ENOB:** **12.94 Bits** (Effective Number of Bits).
+* **Max Error:** 8.0 LSB (Due to integer truncation logic).
+* **Pass Rate:** 100% (within hardware truncation tolerance of < 10 LSB).
+
+### Timing & Latency
+
+* **Average Latency:** 7.67 ms (Round-trip @ 9600 baud).
+* **Processing Time:** Negligible (< 10 s internal FPGA processing).
+* **Throughput:** ~130 operations/sec (Limited by UART Baud Rate).
+
+---
+
+## 🏗️ Architecture Details
+
+### 1. Datapath Pipeline
+
+The arithmetic core avoids costly floating-point units by strictly using integer operations:
+
+* **Normalization:** Binary Tree MSB Detector + Barrel Shifter normalizes input to range .
+* **Initial Guess:** 8-entry Look-Up Table (LUT) provides accurate seed to reduce iteration count.
+* **Iteration Core:**
+* **Goldschmidt Divider:** Replaces long-division with iterative multiplication, leveraging Cyclone IV DSP blocks.
+* **Newton-Raphson Step:** Performs the update .
+
+
+
+### 2. Control Unit (FSM)
+
+A centralized Finite State Machine orchestrates the data flow:
+
+* **IDLE:** Awaits `rx_done` signal from UART.
+* **CHECK_ZERO:** Single-cycle bypass for Input=0.
+* **NORMALIZE & LUT:** Pre-processing for convergence.
+* **CALC_LOOP:** Executes fixed iteration cycles.
+* **DENORMALIZE:** Rescales result back to original magnitude.
+* **TX_SEND:** Transmits result via UART.
+
+---
+
+## 🚀 How to Run
+
+### Simulation (ModelSim)
+
+1. Open ModelSim/Questa.
+2. Compile all files in `src/` and `tb/`.
+3. Run simulation on `tb_sqrt`.
+
+### Hardware Verification
+
+1. Open Quartus Prime and compile the project.
+2. Program the `.sof` file to the FPGA.
+3. Connect FPGA UART to PC.
+4. Run the verification script:
+```bash
+pip install pyserial pandas
+python script/full_test_suite.py
+
+```
+
+
+5. Check `data/FPGA_Professional_Report.csv` for results.
